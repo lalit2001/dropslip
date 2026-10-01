@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type DragEvent, type FormEvent } from "react";
 import { upload } from "@vercel/blob/client";
 import { createShare, finalizeFileShare, prepareFileShare } from "@/app/actions";
 
@@ -21,6 +21,24 @@ export function ShareForm() {
   const [expiry, setExpiry] = useState("7d");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  function handleDragOver(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleDrop(e: DragEvent<HTMLLabelElement>) {
+    e.preventDefault();
+    setIsDragging(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) setFile(dropped);
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -135,14 +153,23 @@ export function ShareForm() {
           className="w-full resize-none rounded-lg border border-black/[.08] bg-white p-4 font-mono text-sm outline-none focus:border-zinc-400 dark:border-white/[.145] dark:bg-zinc-900 dark:focus:border-zinc-600"
         />
       ) : (
-        <label className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-black/[.12] bg-white p-10 text-center text-sm text-zinc-500 hover:border-zinc-400 dark:border-white/[.145] dark:bg-zinc-900 dark:hover:border-zinc-600">
+        <label
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-10 text-center text-sm transition-colors ${
+            isDragging
+              ? "border-zinc-400 bg-zinc-100 text-zinc-700 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-200"
+              : "border-black/[.12] bg-white text-zinc-500 hover:border-zinc-400 dark:border-white/[.145] dark:bg-zinc-900 dark:hover:border-zinc-600"
+          }`}
+        >
           <input
             type="file"
             className="hidden"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           />
           <span className="font-medium text-zinc-900 dark:text-zinc-100">
-            {file?.name ?? "Click to choose a file"}
+            {file?.name ?? (isDragging ? "Drop file to upload" : "Click to choose a file, or drag one here")}
           </span>
           <span>Any file type is supported</span>
         </label>
