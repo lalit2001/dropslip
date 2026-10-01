@@ -47,6 +47,8 @@ async function initSchema(db: Client): Promise<void> {
       file_url TEXT,
       file_download_url TEXT,
       file_pathname TEXT,
+      passcode_hash TEXT,
+      passcode_salt TEXT,
       created_at INTEGER NOT NULL,
       expires_at INTEGER,
       download_count INTEGER NOT NULL DEFAULT 0
@@ -62,6 +64,8 @@ async function initSchema(db: Client): Promise<void> {
   await tryAddColumn(db, `ALTER TABLE shares ADD COLUMN file_url TEXT`);
   await tryAddColumn(db, `ALTER TABLE shares ADD COLUMN file_download_url TEXT`);
   await tryAddColumn(db, `ALTER TABLE shares ADD COLUMN file_pathname TEXT`);
+  await tryAddColumn(db, `ALTER TABLE shares ADD COLUMN passcode_hash TEXT`);
+  await tryAddColumn(db, `ALTER TABLE shares ADD COLUMN passcode_salt TEXT`);
 }
 
 export async function ensureSchema(): Promise<void> {

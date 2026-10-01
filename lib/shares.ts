@@ -1,6 +1,7 @@
-import { del, put } from "@vercel/blob";
+import { del } from "@vercel/blob";
 import { ensureSchema, getDb } from "@/lib/db";
 import { generateShareId } from "@/lib/id";
+import { hashPasscode, verifyPasscode } from "@/lib/passcode";
 
 export const EXPIRY_OPTIONS = {
   never: null,
@@ -16,12 +17,18 @@ export function isExpiryOption(value: string): value is ExpiryOption {
   return value in EXPIRY_OPTIONS;
 }
 
+export function getMaxUploadBytes(): number {
+  const mb = Number(process.env.MAX_UPLOAD_MB) || 100;
+  return mb * 1024 * 1024;
+}
+
 export type TextShare = {
   id: string;
   kind: "text";
   textContent: string;
   createdAt: number;
   expiresAt: number | null;
+  hasPasscode: boolean;
 };
 
 export type FileShare = {
@@ -33,6 +40,7 @@ export type FileShare = {
   createdAt: number;
   expiresAt: number | null;
   downloadCount: number;
+  hasPasscode: boolean;
 };
 
 export type Share = TextShare | FileShare;
@@ -95,25 +103,27 @@ async function deleteBlobIfExists(pathname: string | null): Promise<void> {
   }
 }
 
-function sanitizeFileName(fileName: string): string {
+export function sanitizeFileName(fileName: string): string {
   return fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-150) || "file";
 }
 
 export async function createTextShare(
   textContent: string,
   expiry: ExpiryOption,
-  customId?: string | null
+  customId?: string | null,
+  passcode?: string | null
 ): Promise<string> {
   await ensureSchema();
   const db = getDb();
   const id = await resolveId(customId);
   const createdAt = Math.floor(Date.now() / 1000);
+  const { hash, salt } = passcode ? hashPasscode(passcode) : { hash: null, salt: null };
 
   try {
     await db.execute({
-      sql: `INSERT INTO shares (id, kind, text_content, created_at, expires_at)
-            VALUES (?, 'text', ?, ?, ?)`,
-      args: [id, textContent, createdAt, expiresAtFromOption(expiry)],
+      sql: `INSERT INTO shares (id, kind, text_content, passcode_hash, passcode_salt, created_at, expires_at)
+            VALUES (?, 'text', ?, ?, ?, ?, ?)`,
+      args: [id, textContent, hash, salt, createdAt, expiresAtFromOption(expiry)],
     });
   } catch (error) {
     if (isUniqueConstraintError(error)) throw new SlugTakenError(id);
@@ -123,48 +133,60 @@ export async function createTextShare(
   return id;
 }
 
-export async function createFileShare(
+/**
+ * Reserves a share id (random or custom) and the Blob pathname the client
+ * will upload to directly, without touching file bytes server-side.
+ */
+export async function reserveFileShare(
   fileName: string,
-  fileType: string,
-  fileData: Uint8Array,
-  expiry: ExpiryOption,
   customId?: string | null
-): Promise<string> {
+): Promise<{ id: string; pathname: string }> {
+  await ensureSchema();
+  const id = await resolveId(customId);
+  return { id, pathname: `shares/${id}/${sanitizeFileName(fileName)}` };
+}
+
+export async function finalizeFileShare(params: {
+  id: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  url: string;
+  downloadUrl: string;
+  pathname: string;
+  expiry: ExpiryOption;
+  passcode?: string | null;
+}): Promise<void> {
   await ensureSchema();
   const db = getDb();
-  const id = await resolveId(customId);
   const createdAt = Math.floor(Date.now() / 1000);
-  const contentType = fileType || "application/octet-stream";
-
-  const blob = await put(`shares/${id}/${sanitizeFileName(fileName)}`, Buffer.from(fileData), {
-    access: "public",
-    contentType,
-    addRandomSuffix: false,
-  });
+  const { hash, salt } = params.passcode
+    ? hashPasscode(params.passcode)
+    : { hash: null, salt: null };
 
   try {
     await db.execute({
-      sql: `INSERT INTO shares (id, kind, file_name, file_type, file_size, file_url, file_download_url, file_pathname, created_at, expires_at)
-            VALUES (?, 'file', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO shares (id, kind, file_name, file_type, file_size, file_url, file_download_url, file_pathname, passcode_hash, passcode_salt, created_at, expires_at)
+            VALUES (?, 'file', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        id,
-        fileName,
-        contentType,
-        fileData.byteLength,
-        blob.url,
-        blob.downloadUrl,
-        blob.pathname,
+        params.id,
+        params.fileName,
+        params.fileType || "application/octet-stream",
+        params.fileSize,
+        params.url,
+        params.downloadUrl,
+        params.pathname,
+        hash,
+        salt,
         createdAt,
-        expiresAtFromOption(expiry),
+        expiresAtFromOption(params.expiry),
       ],
     });
   } catch (error) {
-    await deleteBlobIfExists(blob.pathname);
-    if (isUniqueConstraintError(error)) throw new SlugTakenError(id);
+    await deleteBlobIfExists(params.pathname);
+    if (isUniqueConstraintError(error)) throw new SlugTakenError(params.id);
     throw error;
   }
-
-  return id;
 }
 
 async function purgeShare(id: string, pathname: string | null): Promise<void> {
@@ -182,7 +204,7 @@ export async function getShare(id: string): Promise<Share | null> {
   await ensureSchema();
   const db = getDb();
   const result = await db.execute({
-    sql: `SELECT id, kind, text_content, file_name, file_type, file_size, file_pathname, created_at, expires_at, download_count
+    sql: `SELECT id, kind, text_content, file_name, file_type, file_size, file_pathname, passcode_hash, created_at, expires_at, download_count
           FROM shares WHERE id = ? LIMIT 1`,
     args: [id],
   });
@@ -196,6 +218,8 @@ export async function getShare(id: string): Promise<Share | null> {
     return null;
   }
 
+  const hasPasscode = row.passcode_hash !== null;
+
   if (row.kind === "text") {
     return {
       id: row.id as string,
@@ -203,6 +227,7 @@ export async function getShare(id: string): Promise<Share | null> {
       textContent: row.text_content as string,
       createdAt: row.created_at as number,
       expiresAt,
+      hasPasscode,
     };
   }
 
@@ -215,16 +240,37 @@ export async function getShare(id: string): Promise<Share | null> {
     createdAt: row.created_at as number,
     expiresAt,
     downloadCount: row.download_count as number,
+    hasPasscode,
   };
 }
 
-export async function getFileDownloadUrl(
-  id: string
-): Promise<{ downloadUrl: string } | null> {
+export async function checkSharePasscode(
+  id: string,
+  code: string
+): Promise<boolean> {
   await ensureSchema();
   const db = getDb();
   const result = await db.execute({
-    sql: `SELECT kind, file_download_url, file_pathname, expires_at
+    sql: `SELECT passcode_hash, passcode_salt FROM shares WHERE id = ? LIMIT 1`,
+    args: [id],
+  });
+
+  if (result.rows.length === 0) return false;
+  const row = result.rows[0];
+  const hash = row.passcode_hash as string | null;
+  const salt = row.passcode_salt as string | null;
+  if (!hash || !salt) return true; // no passcode set
+
+  return verifyPasscode(code, hash, salt);
+}
+
+export async function getFileShareMeta(
+  id: string
+): Promise<{ downloadUrl: string; hasPasscode: boolean } | null> {
+  await ensureSchema();
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT kind, file_download_url, file_pathname, passcode_hash, expires_at
           FROM shares WHERE id = ? LIMIT 1`,
     args: [id],
   });
@@ -238,10 +284,16 @@ export async function getFileDownloadUrl(
     return null;
   }
 
+  return {
+    downloadUrl: row.file_download_url as string,
+    hasPasscode: row.passcode_hash !== null,
+  };
+}
+
+export async function incrementDownloadCount(id: string): Promise<void> {
+  const db = getDb();
   await db.execute({
     sql: "UPDATE shares SET download_count = download_count + 1 WHERE id = ?",
     args: [id],
   });
-
-  return { downloadUrl: row.file_download_url as string };
 }
