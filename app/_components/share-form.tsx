@@ -93,6 +93,7 @@ export function ShareForm() {
       const blob = await upload(prep.pathname, file, {
         access: "public",
         handleUploadUrl: "/api/blob-upload",
+        multipart: true,
       });
 
       const result = await finalizeFileShare({

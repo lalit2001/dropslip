@@ -4,9 +4,11 @@ A simple text and file sharing app, built on Next.js 16, [Turso](https://turso.t
 
 - Paste text or upload a file on the home page, optionally pick a custom link name and an expiry, and get a shareable `/s/<id>` link.
 - **Text** content and all share metadata (filename, size, expiry, download count) live in Turso.
-- **File bytes** are uploaded to Vercel Blob storage. Turso only stores a reference (URL + pathname) to the blob, not the file itself.
+- **File bytes** upload directly from the browser to Vercel Blob storage (`app/api/blob-upload/route.ts` only issues a short-lived upload token; it never sees the file bytes). Turso stores a reference (URL + pathname) to the blob, not the file itself.
 - Links expire automatically: once a share is read after its `expires_at` has passed, the Turso row **and** its Blob file (if any) are deleted.
-- Downloads hit `app/api/files/[id]/route.ts`, which looks up the share and 307-redirects to the blob's `downloadUrl` — a URL Vercel Blob generates that forces `Content-Disposition: attachment` with the original filename. File bytes never pass through your serverless function on download.
+- Downloads hit `app/api/files/[id]/route.ts`, which checks the optional access code, then 307-redirects to the blob's `downloadUrl` — a URL Vercel Blob generates that forces `Content-Disposition: attachment` with the original filename. File bytes never pass through your serverless function on upload or download.
+- Shares can optionally require an access code to view/download, and can use a custom link name instead of a random id.
+- Each share page shows a QR code linking to it.
 
 ## One-time setup: create a Vercel Blob store
 
@@ -29,7 +31,7 @@ Alternatively, in the Vercel dashboard: **Storage → Create Database → Blob**
    TURSO_DATABASE_URL=libsql://your-database.turso.io
    TURSO_AUTH_TOKEN=your-turso-auth-token
    BLOB_READ_WRITE_TOKEN=your-vercel-blob-read-write-token
-   MAX_UPLOAD_MB=4
+   MAX_UPLOAD_MB=1024
    ```
 
 2. Install dependencies and run the dev server:
@@ -43,10 +45,7 @@ The `shares` table is created automatically on first use — no manual migration
 
 ## Upload size limit
 
-`MAX_UPLOAD_MB` caps how large a shared file can be (default 4 MB). This is still needed even with Blob storage, because the file is first uploaded to your Server Action as a normal request body:
-
-- Vercel serverless functions reject request bodies over **4.5 MB** on the Hobby plan (higher on Pro/Enterprise — check your plan's current limit before raising this).
-- To support larger files without raising that limit, switch to [Vercel Blob client uploads](https://vercel.com/docs/vercel-blob/client-upload), where the browser uploads directly to Blob storage, bypassing your serverless function's body-size limit entirely. Not implemented here — ask if you want this added.
+`MAX_UPLOAD_MB` caps how large a shared file can be (default 1024 MB / 1 GB). Because uploads go directly from the browser to Vercel Blob using [client uploads](https://vercel.com/docs/vercel-blob/client-upload) with multipart enabled, this is a Blob-enforced limit, not a Vercel serverless request-body limit — raise it freely (Vercel Blob supports up to 5 TB per file). The practical ceiling is your Vercel plan's storage/bandwidth allowance and how long you're willing to let a browser upload run.
 
 ## Deploying to Vercel
 
@@ -55,7 +54,7 @@ The `shares` table is created automatically on first use — no manual migration
    - `TURSO_DATABASE_URL`
    - `TURSO_AUTH_TOKEN`
    - `BLOB_READ_WRITE_TOKEN`
-   - `MAX_UPLOAD_MB` (optional, defaults to 4)
+   - `MAX_UPLOAD_MB` (optional, defaults to 1024)
 3. Deploy. No other configuration is required.
 
 ## Tech

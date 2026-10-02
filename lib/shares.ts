@@ -18,7 +18,7 @@ export function isExpiryOption(value: string): value is ExpiryOption {
 }
 
 export function getMaxUploadBytes(): number {
-  const mb = Number(process.env.MAX_UPLOAD_MB) || 100;
+  const mb = Number(process.env.MAX_UPLOAD_MB) || 1024;
   return mb * 1024 * 1024;
 }
 
