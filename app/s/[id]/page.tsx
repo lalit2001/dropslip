@@ -7,6 +7,7 @@ import { CopyButton } from "@/app/_components/copy-button";
 import { ShareLink } from "@/app/_components/share-link";
 import { ShareQrCode } from "@/app/_components/share-qr-code";
 import { PasscodeGate } from "@/app/_components/passcode-gate";
+import { LiveTextEditor } from "@/app/_components/live-text-editor";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -74,6 +75,15 @@ export default async function SharePage({
                 <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/[.08] bg-white p-4 font-mono text-sm dark:border-white/[.145] dark:bg-zinc-900">
                   {share.textContent}
                 </pre>
+              </div>
+            ) : share.kind === "live" ? (
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <span className="text-sm text-zinc-500">
+                    {formatExpiry(share.expiresAt)}
+                  </span>
+                </div>
+                <LiveTextEditor id={share.id} initialText={share.textContent} />
               </div>
             ) : (
               <div className="flex flex-col items-center gap-4 rounded-lg border border-black/[.08] bg-white p-10 text-center dark:border-white/[.145] dark:bg-zinc-900">

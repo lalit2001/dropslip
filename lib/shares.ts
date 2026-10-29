@@ -31,6 +31,15 @@ export type TextShare = {
   hasPasscode: boolean;
 };
 
+export type LiveShare = {
+  id: string;
+  kind: "live";
+  textContent: string;
+  createdAt: number;
+  expiresAt: number | null;
+  hasPasscode: boolean;
+};
+
 export type FileShare = {
   id: string;
   kind: "file";
@@ -43,7 +52,7 @@ export type FileShare = {
   hasPasscode: boolean;
 };
 
-export type Share = TextShare | FileShare;
+export type Share = TextShare | FileShare | LiveShare;
 
 function expiresAtFromOption(option: ExpiryOption): number | null {
   const seconds = EXPIRY_OPTIONS[option];
@@ -107,7 +116,8 @@ export function sanitizeFileName(fileName: string): string {
   return fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-150) || "file";
 }
 
-export async function createTextShare(
+async function createTextKindShare(
+  kind: "text" | "live",
   textContent: string,
   expiry: ExpiryOption,
   customId?: string | null,
@@ -122,8 +132,8 @@ export async function createTextShare(
   try {
     await db.execute({
       sql: `INSERT INTO shares (id, kind, text_content, passcode_hash, passcode_salt, created_at, expires_at)
-            VALUES (?, 'text', ?, ?, ?, ?, ?)`,
-      args: [id, textContent, hash, salt, createdAt, expiresAtFromOption(expiry)],
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [id, kind, textContent, hash, salt, createdAt, expiresAtFromOption(expiry)],
     });
   } catch (error) {
     if (isUniqueConstraintError(error)) throw new SlugTakenError(id);
@@ -131,6 +141,33 @@ export async function createTextShare(
   }
 
   return id;
+}
+
+export async function createTextShare(
+  textContent: string,
+  expiry: ExpiryOption,
+  customId?: string | null,
+  passcode?: string | null
+): Promise<string> {
+  return createTextKindShare("text", textContent, expiry, customId, passcode);
+}
+
+export async function createLiveShare(
+  textContent: string,
+  expiry: ExpiryOption,
+  customId?: string | null,
+  passcode?: string | null
+): Promise<string> {
+  return createTextKindShare("live", textContent, expiry, customId, passcode);
+}
+
+export async function updateLiveText(id: string, textContent: string): Promise<void> {
+  await ensureSchema();
+  const db = getDb();
+  await db.execute({
+    sql: "UPDATE shares SET text_content = ? WHERE id = ? AND kind = 'live'",
+    args: [textContent, id],
+  });
 }
 
 /**
@@ -220,10 +257,10 @@ export async function getShare(id: string): Promise<Share | null> {
 
   const hasPasscode = row.passcode_hash !== null;
 
-  if (row.kind === "text") {
+  if (row.kind === "text" || row.kind === "live") {
     return {
       id: row.id as string,
-      kind: "text",
+      kind: row.kind as "text" | "live",
       textContent: row.text_content as string,
       createdAt: row.created_at as number,
       expiresAt,

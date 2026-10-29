@@ -2,7 +2,12 @@
 
 import { useState, type DragEvent, type FormEvent } from "react";
 import { upload } from "@vercel/blob/client";
-import { createShare, finalizeFileShare, prepareFileShare } from "@/app/actions";
+import {
+  createLiveShareAction,
+  createShare,
+  finalizeFileShare,
+  prepareFileShare,
+} from "@/app/actions";
 
 const EXPIRY_CHOICES: { value: string; label: string }[] = [
   { value: "1h", label: "1 hour" },
@@ -13,7 +18,7 @@ const EXPIRY_CHOICES: { value: string; label: string }[] = [
 ];
 
 export function ShareForm() {
-  const [mode, setMode] = useState<"text" | "file">("text");
+  const [mode, setMode] = useState<"text" | "live" | "file">("text");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [customId, setCustomId] = useState("");
@@ -47,8 +52,8 @@ export function ShareForm() {
     const trimmedCustomId = customId.trim() || null;
     const trimmedPasscode = passcode.trim() || null;
 
-    if (mode === "text") {
-      if (text.trim().length === 0) {
+    if (mode === "text" || mode === "live") {
+      if (mode === "text" && text.trim().length === 0) {
         setError("Enter some text to share.");
         return;
       }
@@ -60,7 +65,8 @@ export function ShareForm() {
       if (trimmedCustomId) formData.set("customId", trimmedCustomId);
       if (trimmedPasscode) formData.set("passcode", trimmedPasscode);
 
-      const result = await createShare(null, formData);
+      const action = mode === "live" ? createLiveShareAction : createShare;
+      const result = await action(null, formData);
       if (result?.error) {
         setError(result.error);
         setPending(false);
@@ -134,6 +140,17 @@ export function ShareForm() {
         </button>
         <button
           type="button"
+          onClick={() => setMode("live")}
+          className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            mode === "live"
+              ? "bg-white shadow-sm dark:bg-zinc-800"
+              : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
+          }`}
+        >
+          Live
+        </button>
+        <button
+          type="button"
           onClick={() => setMode("file")}
           className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${
             mode === "file"
@@ -145,12 +162,25 @@ export function ShareForm() {
         </button>
       </div>
 
-      {mode === "text" ? (
+      {mode === "live" ? (
+        <p className="rounded-lg border border-black/[.08] bg-black/[.02] px-4 py-3 text-sm text-zinc-500 dark:border-white/[.145] dark:bg-white/[.04]">
+          A live share updates in real time — anyone with the link can edit it,
+          and everyone viewing sees changes within a couple seconds. Great for
+          sharing notes you'll keep updating instead of creating a new link
+          each time.
+        </p>
+      ) : null}
+
+      {mode === "text" || mode === "live" ? (
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={10}
-          placeholder="Paste or type anything you want to share..."
+          placeholder={
+            mode === "live"
+              ? "Start typing (optional) — you can also leave this blank and type after creating the link..."
+              : "Paste or type anything you want to share..."
+          }
           className="w-full resize-none rounded-lg border border-black/[.08] bg-white p-4 font-mono text-sm outline-none focus:border-zinc-400 dark:border-white/[.145] dark:bg-zinc-900 dark:focus:border-zinc-600"
         />
       ) : (

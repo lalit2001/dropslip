@@ -9,6 +9,7 @@ A simple text and file sharing app, built on Next.js 16, [Turso](https://turso.t
 - Downloads hit `app/api/files/[id]/route.ts`, which checks the optional access code, then 307-redirects to the blob's `downloadUrl` — a URL Vercel Blob generates that forces `Content-Disposition: attachment` with the original filename. File bytes never pass through your serverless function on upload or download.
 - Shares can optionally require an access code to view/download, and can use a custom link name instead of a random id.
 - Each share page shows a QR code linking to it.
+- **Live** shares are a third mode alongside Text and File: an editable, two-way-syncing text pad. Anyone with the link can edit it, and edits propagate to everyone else viewing within ~2 seconds (`app/api/live/[id]/route.ts` — the client debounces saves ~600ms after typing stops and polls for remote changes every ~2s, skipping the merge while the viewer's textarea is focused so it doesn't clobber what they're mid-typing). Use this instead of a Text share when you need to keep updating the same link rather than creating a new one each time.
 
 ## One-time setup: create a Vercel Blob store
 

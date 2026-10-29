@@ -5,6 +5,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   checkSharePasscode,
+  createLiveShare,
   createTextShare,
   finalizeFileShare as finalizeFileShareDb,
   getMaxUploadBytes,
@@ -60,6 +61,38 @@ export async function createShare(
   let id: string;
   try {
     id = await createTextShare(text, expiry, customId, passcode);
+  } catch (error) {
+    if (error instanceof SlugTakenError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
+
+  redirect(`/s/${id}`);
+}
+
+export async function createLiveShareAction(
+  _prevState: CreateShareState,
+  formData: FormData
+): Promise<CreateShareState> {
+  const expiry = parseExpiry(formData.get("expiry"));
+  const customId = parseOptionalString(formData.get("customId"));
+  const passcode = parseOptionalString(formData.get("passcode"));
+
+  const customIdError = validateCustomId(customId);
+  if (customIdError) return { error: customIdError };
+
+  const text = formData.get("text");
+  const initialText = typeof text === "string" ? text : "";
+  if (initialText.length > MAX_TEXT_CHARS) {
+    return {
+      error: `Text is too long (max ${MAX_TEXT_CHARS.toLocaleString()} characters).`,
+    };
+  }
+
+  let id: string;
+  try {
+    id = await createLiveShare(initialText, expiry, customId, passcode);
   } catch (error) {
     if (error instanceof SlugTakenError) {
       return { error: error.message };
